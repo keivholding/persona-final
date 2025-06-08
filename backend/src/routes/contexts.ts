@@ -1,38 +1,18 @@
-import { Router } from "express";
-import contextController from "../controllers/contextController";
-import {
-  validateRequest,
-  createContextSchema,
-  updateContextSchema,
-} from "../middleware/validation";
-import { authenticateToken } from "../middleware/auth";
+import { Router } from 'express';
+import { ContextController } from '../controllers/contextController';
+import { authenticateToken } from '../middleware/auth';
 
 const router = Router();
 
-// All routes require authentication
+// Apply auth middleware to all routes
 router.use(authenticateToken);
 
-// GET /api/contexts - Get all contexts for user
-router.get("/", contextController.getContexts);
-
-// POST /api/contexts - Create new context
-router.post(
-  "/",
-  validateRequest(createContextSchema),
-  contextController.createContext
-);
-
-// GET /api/contexts/:id - Get specific context
-router.get("/:id", contextController.getContext);
-
-// PUT /api/contexts/:id - Update context
-router.put(
-  "/:id",
-  validateRequest(updateContextSchema),
-  contextController.updateContext
-);
-
-// DELETE /api/contexts/:id - Delete context
-router.delete("/:id", contextController.deleteContext);
+// Context CRUD routes
+router.get('/', ContextController.getContexts);
+router.get('/stats', ContextController.getContextStats);
+router.get('/:id', ContextController.getContext);
+router.post('/', ContextController.createContext);
+router.put('/:id', ContextController.updateContext);
+router.delete('/:id', ContextController.deleteContext);
 
 export default router;
