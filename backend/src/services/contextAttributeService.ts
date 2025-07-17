@@ -1,209 +1,120 @@
-import "dotenv/config";
-import { supabaseAdmin } from "./supabase";
-import {
-  ContextAttribute,
-  CreateContextAttributeRequest,
-  PrivacyMatrixResponse,
-} from "../types/contextAttribute";
-import { Attribute } from "../types/attribute";
-import { Context } from "../types/context";
+import { supabase } from './supabase';
+import { PrivacyMatrix, UpdateVisibilityDto } from '../types/contextAttribute';
 
-class ContextAttributeService {
-  // Get the privacy matrix for a user (all attributes vs all contexts)
-  async getPrivacyMatrix(userId: string): Promise<PrivacyMatrixResponse> {
-    // Get all user's attributes
-    const { data: attributes, error: attributesError } = await supabaseAdmin
-      .from("attributes")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: true });
+export class ContextAttributeService {
+  static async getPrivacyMatrix(userId: string): Promise<PrivacyMatrix> {
+    // Get user's contexts
+    const { data: contexts, error: contextError } = await supabase
+      .from('contexts')
+      .select('id, name, color')
+      .eq('user_id', userId)
+      .order('is_default', { ascending: false })
+      .order('created_at', { ascending: true });
 
-    if (attributesError) throw attributesError;
+    if (contextError) throw new Error(`Failed to fetch contexts: ${contextError.message}`);
 
-    // Get all user's contexts
-    const { data: contexts, error: contextsError } = await supabaseAdmin
-      .from("contexts")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: true });
+    // Get user's attributes
+    const { data: attributes, error: attributeError } = await supabase
+      .from('attributes')
+      .select('id, name, type, value')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
 
-    if (contextsError) throw contextsError;
+    if (attributeError) throw new Error(`Failed to fetch attributes: ${attributeError.message}`);
 
-    // Get all context-attribute relationships for this user
-    const { data: relationships, error: relationshipsError } =
-      await supabaseAdmin
-        .from("context_attributes")
-        .select("context_id, attribute_id")
-        .eq("user_id", userId);
+    // Get visibility mappings
+    const { data: visibility, error: visibilityError } = await supabase
+      .from('context_attributes')
+      .select('context_id, attribute_id')
+      .eq('user_id', userId);
 
-    if (relationshipsError) throw relationshipsError;
+    if (visibilityError) throw new Error(`Failed to fetch visibility: ${visibilityError.message}`);
 
-    // Build the matrix
-    const matrix = attributes.map((attribute: Attribute) => {
-      const contextAssignments: { [contextId: string]: boolean } = {};
-
-      contexts.forEach((context: Context) => {
-        // Check if this attribute is assigned to this context
-        const isAssigned = relationships.some(
-          (rel) =>
-            rel.context_id === context.id && rel.attribute_id === attribute.id
-        );
-        contextAssignments[context.id] = isAssigned;
-      });
-
-      return {
-        attribute: {
-          id: attribute.id,
-          name: attribute.name,
-          value: attribute.value,
-          type: attribute.type,
-        },
-        contexts: contextAssignments,
-      };
+    // Build visibility map
+    const visibilityMap = new Set();
+    (visibility || []).forEach(v => {
+      visibilityMap.add(`${v.context_id}:${v.attribute_id}`);
     });
 
+    // Build matrix
+    const matrix = (attributes || []).map(attribute => ({
+      attribute,
+      contexts: (contexts || []).reduce((acc, context) => {
+        acc[context.id] = visibilityMap.has(`${context.id}:${attribute.id}`);
+        return acc;
+      }, {} as Record<string, boolean>)
+    }));
+
     return {
-      attributes,
-      contexts,
-      matrix,
+      contexts: contexts || [],
+      matrix
     };
   }
 
-  // Assign an attribute to a context
-  async assignAttributeToContext(
-    userId: string,
-    data: CreateContextAttributeRequest
-  ): Promise<ContextAttribute> {
-    // Convert IDs to strings to ensure consistency
-    const contextId = String(data.context_id);
-    const attributeId = String(data.attribute_id);
+  static async updateVisibility(userId: string, data: UpdateVisibilityDto): Promise<void> {
+    const { context_id, attribute_id, visible } = data;
 
-    // Verify both context and attribute belong to the user
-    const [contextCheck, attributeCheck] = await Promise.all([
-      supabaseAdmin
-        .from("contexts")
-        .select("id")
-        .eq("id", contextId)
-        .eq("user_id", userId)
-        .single(),
-      supabaseAdmin
-        .from("attributes")
-        .select("id")
-        .eq("id", attributeId)
-        .eq("user_id", userId)
-        .single(),
-    ]);
-
-    if (contextCheck.error || attributeCheck.error) {
-      throw new Error("Context or attribute not found or unauthorized");
-    }
-
-    // Create the assignment
-    const { data: assignment, error } = await supabaseAdmin
-      .from("context_attributes")
-      .insert([
-        {
-          context_id: contextId,
-          attribute_id: attributeId,
+    if (visible) {
+      // Add visibility
+      const { error } = await supabase
+        .from('context_attributes')
+        .insert({
           user_id: userId,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
+          context_id,
+          attribute_id
+        });
+
+      if (error && !error.message.includes('duplicate')) {
+        throw new Error(`Failed to add visibility: ${error.message}`);
+      }
+    } else {
+      // Remove visibility
+      const { error } = await supabase
+        .from('context_attributes')
+        .delete()
+        .eq('user_id', userId)
+        .eq('context_id', context_id)
+        .eq('attribute_id', attribute_id);
+
+      if (error) {
+        throw new Error(`Failed to remove visibility: ${error.message}`);
+      }
+    }
+  }
+
+  static async bulkUpdateVisibility(
+    userId: string, 
+    updates: UpdateVisibilityDto[]
+  ): Promise<void> {
+    const promises = updates.map(update => 
+      this.updateVisibility(userId, update)
+    );
+
+    await Promise.all(promises);
+  }
+
+  static async getContextProfile(userId: string, contextId: string): Promise<any> {
+    const { data: context } = await supabase
+      .from('contexts')
+      .select('*')
+      .eq('id', contextId)
+      .eq('user_id', userId)
       .single();
 
-    if (error) {
-      // Handle unique constraint violation gracefully
-      if (error.code === "23505") {
-        throw new Error("Attribute is already assigned to this context");
-      }
-      throw error;
-    }
+    if (!context) throw new Error('Context not found');
 
-    return assignment;
-  }
+    const { data: attributes } = await supabase
+      .from('attributes')
+      .select(`
+        id, name, type, value,
+        context_attributes!inner(*)
+      `)
+      .eq('user_id', userId)
+      .eq('context_attributes.context_id', contextId);
 
-  // Remove an attribute from a context
-  async removeAttributeFromContext(
-    userId: string,
-    contextId: string,
-    attributeId: string
-  ): Promise<void> {
-    // Convert IDs to strings to ensure consistency
-    const contextIdStr = String(contextId);
-    const attributeIdStr = String(attributeId);
-
-    const { error } = await supabaseAdmin
-      .from("context_attributes")
-      .delete()
-      .eq("context_id", contextIdStr)
-      .eq("attribute_id", attributeIdStr)
-      .eq("user_id", userId); // Ensure user owns the assignment
-
-    if (error) throw error;
-  }
-
-  // Get all attributes for a specific context
-  async getAttributesForContext(
-    userId: string,
-    contextId: string
-  ): Promise<Attribute[]> {
-    const { data, error } = await supabaseAdmin
-      .from("context_attributes")
-      .select(
-        `
-        attributes (
-          id,
-          name,
-          value,
-          type,
-          created_at,
-          updated_at
-        )
-      `
-      )
-      .eq("context_id", contextId)
-      .eq("user_id", userId);
-
-    if (error) throw error;
-
-    // Extract the attributes from the joined data
-    return data.map((item: any) => ({
-      ...item.attributes,
-      user_id: userId,
-    }));
-  }
-
-  // Get all contexts that contain a specific attribute
-  async getContextsForAttribute(
-    userId: string,
-    attributeId: string
-  ): Promise<Context[]> {
-    const { data, error } = await supabaseAdmin
-      .from("context_attributes")
-      .select(
-        `
-        contexts (
-          id,
-          name,
-          description,
-          color,
-          created_at,
-          updated_at
-        )
-      `
-      )
-      .eq("attribute_id", attributeId)
-      .eq("user_id", userId);
-
-    if (error) throw error;
-
-    // Extract the contexts from the joined data
-    return data.map((item: any) => ({
-      ...item.contexts,
-      user_id: userId,
-    }));
+    return {
+      context,
+      attributes: attributes || []
+    };
   }
 }
-
-export default new ContextAttributeService();
