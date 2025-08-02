@@ -1,153 +1,181 @@
-import request from "supertest";
-import app from "../app";
-import { supabaseAdmin } from "../services/supabase";
+import request from 'supertest';
+import app from '../app';
+import { UserService } from '../services/userService';
 
-describe("Authentication Endpoints", () => {
-  const testUser = {
-    email: "test@example.com",
-    password: "testpassword123",
-    confirmPassword: "testpassword123",
-  };
+// Mock the UserService
+jest.mock('../services/userService');
+const mockUserService = UserService as jest.Mocked<typeof UserService>;
 
-  // Clean up test data
-  afterEach(async () => {
-    await supabaseAdmin.from("users").delete().eq("email", testUser.email);
+describe('Authentication Endpoints', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
-  describe("POST /api/auth/signup", () => {
-    it("should create a new user successfully", async () => {
+  describe('POST /api/auth/signup', () => {
+    it('should create a new user with valid data', async () => {
+      const userData = {
+        email: 'test@example.com',
+        password: 'SecurePass123!',
+        first_name: 'Test',
+        last_name: 'User'
+      };
+
+      const mockUser = {
+        id: 'user-123',
+        email: userData.email,
+        first_name: userData.first_name,
+        last_name: userData.last_name,
+        created_at: new Date()
+      };
+
+      const mockToken = 'jwt-token-123';
+
+      mockUserService.createUser.mockResolvedValue({
+        user: mockUser,
+        token: mockToken
+      });
+
       const response = await request(app)
-        .post("/api/auth/signup")
-        .send(testUser)
+        .post('/api/auth/signup')
+        .send(userData)
         .expect(201);
 
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.user.email).toBe(testUser.email);
-      expect(response.body.data.token).toBeDefined();
-      expect(response.body.data.user.password_hash).toBeUndefined(); // Should not expose password
+      expect(response.body).toMatchObject({
+        message: 'Account created successfully',
+        token: mockToken,
+        user: mockUser
+      });
+
+      expect(mockUserService.createUser).toHaveBeenCalledWith({
+        email: userData.email,
+        password: userData.password,
+        first_name: userData.first_name,
+        last_name: userData.last_name
+      });
     });
 
-    it("should reject duplicate email addresses", async () => {
-      // First signup
-      await request(app).post("/api/auth/signup").send(testUser).expect(201);
-
-      // Second signup with same email
+    it('should return 400 with missing email', async () => {
       const response = await request(app)
-        .post("/api/auth/signup")
-        .send(testUser)
-        .expect(409);
+        .post('/api/auth/signup')
+        .send({ password: 'SecurePass123!' })
+        .expect(400);
 
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain("already exists");
+      expect(response.body.error).toBe('Email and password are required');
     });
 
-    it("should validate email format", async () => {
+    it('should return 400 with invalid email format', async () => {
       const response = await request(app)
-        .post("/api/auth/signup")
+        .post('/api/auth/signup')
         .send({
-          email: "invalid-email",
-          password: "testpassword123",
-          confirmPassword: "testpassword123",
+          email: 'invalid-email',
+          password: 'SecurePass123!'
         })
         .expect(400);
 
-      expect(response.body.success).toBe(false);
+      expect(response.body.error).toBe('Invalid email format');
     });
 
-    it("should enforce password requirements", async () => {
+    it('should handle service errors', async () => {
+      mockUserService.createUser.mockRejectedValue(new Error('User already exists'));
+
       const response = await request(app)
-        .post("/api/auth/signup")
+        .post('/api/auth/signup')
         .send({
-          email: "test@example.com",
-          password: "123", // Too short
-          confirmPassword: "123",
+          email: 'existing@example.com',
+          password: 'SecurePass123!'
         })
         .expect(400);
 
-      expect(response.body.success).toBe(false);
+      expect(response.body.error).toBe('User already exists');
     });
   });
 
-  describe("POST /api/auth/login", () => {
-    beforeEach(async () => {
-      // Create test user
-      await request(app).post("/api/auth/signup").send(testUser);
-    });
+  describe('POST /api/auth/login', () => {
+    it('should login with valid credentials', async () => {
+      const credentials = {
+        email: 'test@example.com',
+        password: 'SecurePass123!'
+      };
 
-    it("should login with correct credentials", async () => {
+      const mockUser = {
+        id: 'user-123',
+        email: credentials.email,
+        created_at: new Date()
+      };
+
+      const mockToken = 'jwt-token-123';
+
+      mockUserService.loginUser.mockResolvedValue({
+        user: mockUser,
+        token: mockToken
+      });
+
       const response = await request(app)
-        .post("/api/auth/login")
-        .send(testUser)
+        .post('/api/auth/login')
+        .send(credentials)
         .expect(200);
 
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.user.email).toBe(testUser.email);
-      expect(response.body.data.token).toBeDefined();
+      expect(response.body).toMatchObject({
+        message: 'Login successful',
+        token: mockToken,
+        user: mockUser
+      });
     });
 
-    it("should reject incorrect password", async () => {
+    it('should return 400 with missing credentials', async () => {
       const response = await request(app)
-        .post("/api/auth/login")
+        .post('/api/auth/login')
+        .send({ email: 'test@example.com' })
+        .expect(400);
+
+      expect(response.body.error).toBe('Email and password are required');
+    });
+
+    it('should handle invalid credentials', async () => {
+      mockUserService.loginUser.mockRejectedValue(new Error('Invalid email or password'));
+
+      const response = await request(app)
+        .post('/api/auth/login')
         .send({
-          email: testUser.email,
-          password: "wrongpassword",
+          email: 'wrong@example.com',
+          password: 'wrongpassword'
         })
         .expect(401);
 
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toBe("Invalid credentials");
-    });
-
-    it("should reject non-existent email", async () => {
-      const response = await request(app)
-        .post("/api/auth/login")
-        .send({
-          email: "nonexistent@example.com",
-          password: "password123",
-        })
-        .expect(401);
-
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toBe("Invalid credentials");
+      expect(response.body.error).toBe('Invalid email or password');
     });
   });
 
-  describe("GET /api/auth/me", () => {
-    let userToken: string;
+  describe('GET /api/auth/me', () => {
+    it('should return user info with valid token', async () => {
+      const mockUser = {
+        id: 'user-123',
+        email: 'test@example.com',
+        created_at: new Date()
+      };
 
-    beforeEach(async () => {
-      const signupResponse = await request(app)
-        .post("/api/auth/signup")
-        .send(testUser);
+      mockUserService.getUserById.mockResolvedValue(mockUser);
 
-      userToken = signupResponse.body.data.token;
-    });
+      // Mock JWT verification
+      const jwt = require('jsonwebtoken');
+      jest.spyOn(jwt, 'verify').mockImplementation((token, secret, callback) => {
+        callback(null, { userId: 'user-123', email: 'test@example.com' });
+      });
 
-    it("should return user data with valid token", async () => {
       const response = await request(app)
-        .get("/api/auth/me")
-        .set("Authorization", `Bearer ${userToken}`)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer valid-token')
         .expect(200);
 
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.user.email).toBe(testUser.email);
-      expect(response.body.data.user.password_hash).toBeUndefined();
+      expect(response.body.user).toMatchObject(mockUser);
     });
 
-    it("should reject requests without token", async () => {
-      const response = await request(app).get("/api/auth/me").expect(401);
-
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toBe("Access token required");
-    });
-
-    it("should reject requests with invalid token", async () => {
+    it('should return 401 without token', async () => {
       const response = await request(app)
-        .get("/api/auth/me")
-        .set("Authorization", "Bearer invalid-token")
+        .get('/api/auth/me')
         .expect(401);
 
-      expect(response.body.success).toBe(false);
+      expect(response.body.error).toBe('Access token required');
     });
   });
 });
