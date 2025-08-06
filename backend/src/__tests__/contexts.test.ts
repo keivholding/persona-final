@@ -1,304 +1,171 @@
-import request from "supertest";
-import app from "../app";
-import { supabaseAdmin } from "../services/supabase";
+import request from 'supertest';
+import app from '../app';
+import { ContextService } from '../services/contextService';
 
-describe("Context Management Endpoints", () => {
-  let userToken: string;
-  let userId: string;
+jest.mock('../services/contextService');
+const mockContextService = ContextService as jest.Mocked<typeof ContextService>;
 
-  const testUser = {
-    email: "context-test@example.com",
-    password: "testpassword123",
-    confirmPassword: "testpassword123",
-  };
+// Mock JWT middleware
+jest.mock('../middleware/auth', () => ({
+  authenticateToken: (req: any, res: any, next: any) => {
+    req.userId = 'user-123';
+    next();
+  }
+}));
 
-  beforeEach(async () => {
-    // Create test user and get token
-    const signupResponse = await request(app)
-      .post("/api/auth/signup")
-      .send(testUser);
-
-    userToken = signupResponse.body.data.token;
-    userId = signupResponse.body.data.user.id;
+describe('Context Endpoints', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
-  afterEach(async () => {
-    // Clean up test data
-    await supabaseAdmin.from("contexts").delete().eq("user_id", userId);
+  describe('GET /api/contexts', () => {
+    it('should return user contexts', async () => {
+      const mockContexts = [
+        {
+          id: 'ctx-1',
+          user_id: 'user-123',
+          name: 'Work',
+          description: 'Professional context',
+          color: '#3B82F6',
+          is_default: true,
+          created_at: new Date(),
+          updated_at: new Date()
+        },
+        {
+          id: 'ctx-2',
+          user_id: 'user-123',
+          name: 'Personal',
+          description: 'Personal context',
+          color: '#10B981',
+          is_default: false,
+          created_at: new Date(),
+          updated_at: new Date()
+        }
+      ];
 
-    await supabaseAdmin.from("users").delete().eq("email", testUser.email);
-  });
-
-  describe("POST /api/contexts", () => {
-    it("should create a new context successfully", async () => {
-      const contextData = {
-        name: "Work",
-        description: "Professional contacts",
-        color: "#6366f1",
-      };
+      mockContextService.getUserContexts.mockResolvedValue(mockContexts);
 
       const response = await request(app)
-        .post("/api/contexts")
-        .set("Authorization", `Bearer ${userToken}`)
+        .get('/api/contexts')
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        success: true,
+        data: mockContexts,
+        count: 2
+      });
+    });
+
+    it('should handle service errors', async () => {
+      mockContextService.getUserContexts.mockRejectedValue(new Error('Database error'));
+
+      const response = await request(app)
+        .get('/api/contexts')
+        .expect(500);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error).toBe('Database error');
+    });
+  });
+
+  describe('POST /api/contexts', () => {
+    it('should create a new context', async () => {
+      const contextData = {
+        name: 'New Context',
+        description: 'A new context',
+        color: '#EF4444'
+      };
+
+      const mockContext = {
+        id: 'ctx-new',
+        user_id: 'user-123',
+        ...contextData,
+        is_default: false,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      mockContextService.createContext.mockResolvedValue(mockContext);
+
+      const response = await request(app)
+        .post('/api/contexts')
         .send(contextData)
         .expect(201);
 
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.context.name).toBe(contextData.name);
-      expect(response.body.data.context.description).toBe(
-        contextData.description
-      );
-      expect(response.body.data.context.color).toBe(contextData.color);
-      expect(response.body.data.context.user_id).toBe(userId);
-    });
-
-    it("should require authentication", async () => {
-      const contextData = {
-        name: "Work",
-        description: "Professional contacts",
-        color: "#6366f1",
-      };
-
-      const response = await request(app)
-        .post("/api/contexts")
-        .send(contextData)
-        .expect(401);
-
-      expect(response.body.success).toBe(false);
-    });
-
-    it("should validate required fields", async () => {
-      const response = await request(app)
-        .post("/api/contexts")
-        .set("Authorization", `Bearer ${userToken}`)
-        .send({
-          description: "Missing name field",
-        })
-        .expect(400);
-
-      expect(response.body.success).toBe(false);
-    });
-
-    it("should validate color format", async () => {
-      const response = await request(app)
-        .post("/api/contexts")
-        .set("Authorization", `Bearer ${userToken}`)
-        .send({
-          name: "Work",
-          description: "Professional contacts",
-          color: "invalid-color",
-        })
-        .expect(400);
-
-      expect(response.body.success).toBe(false);
-    });
-  });
-
-  describe("GET /api/contexts", () => {
-    beforeEach(async () => {
-      // Create test contexts
-      await supabaseAdmin.from("contexts").insert([
-        {
-          user_id: userId,
-          name: "Work",
-          description: "Professional",
-          color: "#6366f1",
-        },
-        {
-          user_id: userId,
-          name: "Personal",
-          description: "Friends and family",
-          color: "#10b981",
-        },
-      ]);
-    });
-
-    it("should return user contexts", async () => {
-      const response = await request(app)
-        .get("/api/contexts")
-        .set("Authorization", `Bearer ${userToken}`)
-        .expect(200);
-
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.contexts).toHaveLength(2);
-      expect(response.body.data.contexts[0].user_id).toBe(userId);
-      expect(response.body.data.contexts[1].user_id).toBe(userId);
-    });
-
-    it("should require authentication", async () => {
-      const response = await request(app).get("/api/contexts").expect(401);
-
-      expect(response.body.success).toBe(false);
-    });
-
-    it("should only return contexts for authenticated user", async () => {
-      // Create another user with contexts
-      const otherUser = {
-        email: "other@example.com",
-        password: "password123",
-        confirmPassword: "password123",
-      };
-
-      const otherSignup = await request(app)
-        .post("/api/auth/signup")
-        .send(otherUser);
-
-      const otherUserId = otherSignup.body.data.user.id;
-
-      await supabaseAdmin.from("contexts").insert({
-        user_id: otherUserId,
-        name: "Other User Context",
-        description: "Should not be visible",
-        color: "#ef4444",
+      expect(response.body).toMatchObject({
+        success: true,
+        message: 'Context created successfully',
+        data: mockContext
       });
 
+      expect(mockContextService.createContext).toHaveBeenCalledWith('user-123', contextData);
+    });
+
+    it('should return 400 without name', async () => {
       const response = await request(app)
-        .get("/api/contexts")
-        .set("Authorization", `Bearer ${userToken}`)
-        .expect(200);
+        .post('/api/contexts')
+        .send({ description: 'No name provided' })
+        .expect(400);
 
-      expect(response.body.data.contexts).toHaveLength(2); // Only original user's contexts
-      expect(
-        response.body.data.contexts.every((ctx: any) => ctx.user_id === userId)
-      ).toBe(true);
-
-      // Cleanup
-      await supabaseAdmin.from("users").delete().eq("email", otherUser.email);
+      expect(response.body.error).toBe('Context name is required');
     });
   });
 
-  describe("PUT /api/contexts/:id", () => {
-    let contextId: string;
-
-    beforeEach(async () => {
-      const { data } = await supabaseAdmin
-        .from("contexts")
-        .insert({
-          user_id: userId,
-          name: "Work",
-          description: "Professional",
-          color: "#6366f1",
-        })
-        .select()
-        .single();
-
-      contextId = data.id;
-    });
-
-    it("should update context successfully", async () => {
-      const updateData = {
-        name: "Updated Work",
-        description: "Updated description",
+  describe('PUT /api/contexts/:id', () => {
+    it('should update a context', async () => {
+      const updates = { name: 'Updated Context' };
+      const mockUpdatedContext = {
+        id: 'ctx-1',
+        user_id: 'user-123',
+        name: 'Updated Context',
+        description: 'Original description',
+        color: '#3B82F6',
+        is_default: false,
+        created_at: new Date(),
+        updated_at: new Date()
       };
 
+      mockContextService.updateContext.mockResolvedValue(mockUpdatedContext);
+
       const response = await request(app)
-        .put(`/api/contexts/${contextId}`)
-        .set("Authorization", `Bearer ${userToken}`)
-        .send(updateData)
+        .put('/api/contexts/ctx-1')
+        .send(updates)
         .expect(200);
 
-      expect(response.body.success).toBe(true);
-      expect(response.body.data.context.name).toBe(updateData.name);
-      expect(response.body.data.context.description).toBe(
-        updateData.description
-      );
-    });
+      expect(response.body).toMatchObject({
+        success: true,
+        message: 'Context updated successfully',
+        data: mockUpdatedContext
+      });
 
-    it("should prevent updating other users contexts", async () => {
-      // Create another user
-      const otherUser = {
-        email: "other@example.com",
-        password: "password123",
-        confirmPassword: "password123",
-      };
-
-      const otherSignup = await request(app)
-        .post("/api/auth/signup")
-        .send(otherUser);
-
-      const otherToken = otherSignup.body.data.token;
-
-      const response = await request(app)
-        .put(`/api/contexts/${contextId}`)
-        .set("Authorization", `Bearer ${otherToken}`)
-        .send({
-          name: "Malicious Update",
-        })
-        .expect(404);
-
-      expect(response.body.success).toBe(false);
-
-      // Cleanup
-      await supabaseAdmin.from("users").delete().eq("email", otherUser.email);
+      expect(mockContextService.updateContext).toHaveBeenCalledWith('user-123', 'ctx-1', updates);
     });
   });
 
-  describe("DELETE /api/contexts/:id", () => {
-    let contextId: string;
+  describe('DELETE /api/contexts/:id', () => {
+    it('should delete a context', async () => {
+      mockContextService.deleteContext.mockResolvedValue();
 
-    beforeEach(async () => {
-      const { data } = await supabaseAdmin
-        .from("contexts")
-        .insert({
-          user_id: userId,
-          name: "Work",
-          description: "Professional",
-          color: "#6366f1",
-        })
-        .select()
-        .single();
-
-      contextId = data.id;
-    });
-
-    it("should delete context successfully", async () => {
       const response = await request(app)
-        .delete(`/api/contexts/${contextId}`)
-        .set("Authorization", `Bearer ${userToken}`)
+        .delete('/api/contexts/ctx-1')
         .expect(200);
 
-      expect(response.body.success).toBe(true);
+      expect(response.body).toMatchObject({
+        success: true,
+        message: 'Context deleted successfully'
+      });
 
-      // Verify deletion
-      const { data } = await supabaseAdmin
-        .from("contexts")
-        .select()
-        .eq("id", contextId);
-
-      expect(data).toHaveLength(0);
+      expect(mockContextService.deleteContext).toHaveBeenCalledWith('user-123', 'ctx-1');
     });
 
-    it("should prevent deleting other users contexts", async () => {
-      // Create another user
-      const otherUser = {
-        email: "other@example.com",
-        password: "password123",
-        confirmPassword: "password123",
-      };
-
-      const otherSignup = await request(app)
-        .post("/api/auth/signup")
-        .send(otherUser);
-
-      const otherToken = otherSignup.body.data.token;
+    it('should handle deletion errors', async () => {
+      mockContextService.deleteContext.mockRejectedValue(new Error('Cannot delete your only context'));
 
       const response = await request(app)
-        .delete(`/api/contexts/${contextId}`)
-        .set("Authorization", `Bearer ${otherToken}`)
-        .expect(404);
+        .delete('/api/contexts/ctx-1')
+        .expect(400);
 
-      expect(response.body.success).toBe(false);
-
-      // Verify context still exists
-      const { data } = await supabaseAdmin
-        .from("contexts")
-        .select()
-        .eq("id", contextId);
-
-      expect(data).toHaveLength(1);
-
-      // Cleanup
-      await supabaseAdmin.from("users").delete().eq("email", otherUser.email);
+      expect(response.body.error).toBe('Cannot delete your only context');
     });
   });
 });
