@@ -1,67 +1,98 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import compression from 'compression';
-import morgan from 'morgan';
-import authRoutes from './routes/auth';
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import compression from "compression";
+import morgan from "morgan";
+import routes from "./routes";
+import { apiLimiter } from "./middleware/rateLimiter";
+import { ApiResponse } from "./types";
 
+// Create Express app
 const app = express();
 
-// Logging
-app.use(morgan('combined'));
-
 // Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-    },
-  },
-}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
-// CORS
-app.use(cors({
-  origin: process.env.FRONTEND_URL?.split(',') || ['http://localhost:5173'],
-  credentials: true
-}));
+// CORS configuration
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
-// Compression
+// Compression middleware
 app.use(compression());
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Logging middleware
+if (process.env.NODE_ENV !== "test") {
+  app.use(morgan("combined"));
+}
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development'
-  });
+// Rate limiting (disabled in test environment)
+if (process.env.NODE_ENV !== "test") {
+  app.use(apiLimiter);
+}
+
+// Body parsing middleware
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// API routes
+app.use("/api", routes);
+
+// Root endpoint
+app.get("/", (req, res) => {
+  const response: ApiResponse = {
+    success: true,
+    message: "Persona.io API Server",
+    data: {
+      version: "1.0.0",
+      environment: process.env.NODE_ENV || "development",
+      timestamp: new Date().toISOString(),
+    },
+  };
+  res.status(200).json(response);
 });
-
-// Routes
-app.use('/api/auth', authRoutes);
 
 // 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found',
-    path: req.originalUrl
-  });
+app.use("*", (req, res) => {
+  const response: ApiResponse = {
+    success: false,
+    error: "Route not found",
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+  };
+  res.status(404).json(response);
 });
 
-// Error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error'
-  });
-});
+// Global error handler
+app.use(
+  (
+    error: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    console.error("Global error handler:", error);
+
+    const response: ApiResponse = {
+      success: false,
+      error: "Internal server error",
+      message:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : "Something went wrong",
+    };
+
+    res.status(error.status || 500).json(response);
+  }
+);
 
 export default app;

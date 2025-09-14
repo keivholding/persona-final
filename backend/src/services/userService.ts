@@ -1,110 +1,56 @@
-import { supabase } from './supabase';
-import { User, PublicUser, CreateUserDto, LoginDto, UpdateUserDto } from '../types/user';
-import { hashPassword, comparePassword, validatePassword } from '../utils/password';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { supabase } from './supabase';
+import { User, CreateUserDto, LoginDto } from '../types/user';
 
 export class UserService {
-  static async createUser(userData: CreateUserDto): Promise<{ user: PublicUser; token: string }> {
-    // Validate password strength
-    const passwordError = validatePassword(userData.password);
-    if (passwordError) {
-      throw new Error(passwordError);
-    }
-
-    // Check if user exists
-    const { data: existingUser } = await supabase
+  static async createUser(userData: CreateUserDto): Promise<{ user: User; token: string }> {
+    const existingUser = await supabase
       .from('users')
       .select('id')
-      .eq('email', userData.email.toLowerCase())
+      .eq('email', userData.email)
       .single();
 
-    if (existingUser) {
-      throw new Error('User with this email already exists');
+    if (existingUser.data) {
+      throw new Error('User already exists');
     }
 
-    // Hash password
-    const passwordHash = await hashPassword(userData.password);
+    const hashedPassword = await bcrypt.hash(userData.password, 12);
 
-    // Create user
     const { data: user, error } = await supabase
       .from('users')
       .insert({
-        email: userData.email.toLowerCase(),
-        password_hash: passwordHash,
-        first_name: userData.first_name,
-        last_name: userData.last_name
+        email: userData.email,
+        password_hash: hashedPassword
       })
-      .select('id, email, first_name, last_name, created_at')
+      .select('*')
       .single();
 
-    if (error) {
-      throw new Error(`Failed to create user: ${error.message}`);
-    }
+    if (error) throw error;
 
-    // Generate JWT
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!);
+    
     return { user, token };
   }
 
-  static async loginUser(credentials: LoginDto): Promise<{ user: PublicUser; token: string }> {
-    // Find user
+  static async loginUser(credentials: LoginDto): Promise<{ user: User; token: string }> {
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
-      .eq('email', credentials.email.toLowerCase())
+      .eq('email', credentials.email)
       .single();
 
     if (error || !user) {
-      throw new Error('Invalid email or password');
+      throw new Error('Invalid credentials');
     }
 
-    // Verify password
-    const isValidPassword = await comparePassword(credentials.password, user.password_hash);
+    const isValidPassword = await bcrypt.compare(credentials.password, user.password_hash);
     if (!isValidPassword) {
-      throw new Error('Invalid email or password');
+      throw new Error('Invalid credentials');
     }
 
-    // Generate JWT
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-
-    // Return user without password hash
-    const { password_hash, ...publicUser } = user;
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!);
     
-    return { user: publicUser, token };
-  }
-
-  static async getUserById(userId: string): Promise<PublicUser | null> {
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, email, first_name, last_name, profile_image_url, created_at')
-      .eq('id', userId)
-      .single();
-
-    if (error) return null;
-    return user;
-  }
-
-  static async updateUser(userId: string, updates: UpdateUserDto): Promise<PublicUser> {
-    const { data: user, error } = await supabase
-      .from('users')
-      .update(updates)
-      .eq('id', userId)
-      .select('id, email, first_name, last_name, profile_image_url, created_at')
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to update user: ${error.message}`);
-    }
-
-    return user;
+    return { user, token };
   }
 }
