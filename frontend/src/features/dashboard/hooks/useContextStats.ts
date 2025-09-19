@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { type PrivacyMatrixData } from "../../../types/privacyMatrix";
 
-export interface ContextStats {
+export interface ContextUIStats {
   totalAttributes: number;
   visibleAttributes: number;
   hiddenAttributes: number;
@@ -9,7 +9,7 @@ export interface ContextStats {
   privacyScore: number; // 0-100, higher = more private (more hidden)
 }
 
-export const useContextStats = (matrixData: PrivacyMatrixData | null, contextId: string): ContextStats => {
+export const useContextStats = (matrixData: PrivacyMatrixData | null, contextId: string): ContextUIStats => {
   return useMemo(() => {
     if (!matrixData || !matrixData.matrix.length) {
       return {

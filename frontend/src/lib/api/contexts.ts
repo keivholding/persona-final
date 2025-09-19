@@ -1,4 +1,4 @@
-import { Context, CreateContextRequest, UpdateContextRequest, ContextStats } from '../../types/context';
+import type { Context, CreateContextRequest, UpdateContextRequest, ContextStats } from '../../types/context';
 
 const API_BASE = '/api';
 

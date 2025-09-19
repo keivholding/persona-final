@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContexts } from '../hooks/useContexts';
 import { ContextGrid } from '../components/ContextGrid';
-import { Context } from '../types/context';
+import type { Context } from '../types/context';
 
 const ContextsPage = () => {
   const { user, logout } = useAuth();

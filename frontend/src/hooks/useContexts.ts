@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Context, CreateContextRequest, UpdateContextRequest } from '../types/context';
+import type { Context, CreateContextRequest, UpdateContextRequest } from '../types/context';
 import { contextApi } from '../lib/api/contexts';
 
 export const useContexts = () => {

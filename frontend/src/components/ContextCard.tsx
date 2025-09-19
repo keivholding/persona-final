@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Context } from '../types/context';
+import type { Context } from '../types/context';
 
 interface ContextCardProps {
   context: Context;

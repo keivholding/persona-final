@@ -1,5 +1,5 @@
 import React from 'react';
-import { Context } from '../types/context';
+import type { Context } from '../types/context';
 import { ContextCard } from './ContextCard';
 
 interface ContextGridProps {
