@@ -12,8 +12,6 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 
-[🚀 Live Demo](#) • [📖 Documentation](#documentation) • [🐛 Report Bug](#) • [💡 Request Feature](#)
-
 </div>
 
 ---
@@ -300,18 +298,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - **Supabase** for providing excellent backend-as-a-service
-- **Vercel** for seamless frontend deployment
 - **TailwindCSS** for beautiful, responsive design system
 - **React Query** for powerful data synchronization
-
----
-
-## 📞 Support
-
-- **Documentation**: [docs.persona.io](#)
-- **Email**: support@persona.io
-- **Discord**: [Join our community](#)
-- **GitHub Issues**: [Report bugs or request features](https://github.com/yourusername/persona-io/issues)
 
 ---
 
